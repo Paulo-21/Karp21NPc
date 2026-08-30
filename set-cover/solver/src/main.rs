@@ -1,4 +1,4 @@
-use std::fs;
+use std::{f32, fs, iter::Sum, time::Instant};
 
 #[derive(Debug)]
 struct Instance {
@@ -9,7 +9,8 @@ struct Instance {
 }
 
 fn parse_instance() -> Instance {
-    let file = fs::read_to_string("../instances/scp41.txt").unwrap();
+    //let file = fs::read_to_string("../instances/scp41.txt").unwrap();
+    let file = fs::read_to_string("../instances/scp510.txt").unwrap();
 
     // Tous les nombres du fichier, indépendamment des retours à la ligne.
     let mut tokens = file.split_ascii_whitespace();
@@ -53,22 +54,207 @@ fn parse_instance() -> Instance {
     Instance { m, n, costs, rows }
 }
 fn init_ti(instance: &Instance) -> Vec<f32> {
-    let mut ti = Vec::with_capacity(instance.n);
-    for i in 0..instance.n {}
+    let mut ti = Vec::with_capacity(instance.m);
+    for i in 0..instance.m {
+        let mut min = i32::MAX;
+        // rows[i] contient les colonnes qui couvrent la ligne i
+        for &j in &instance.rows[i] {
+            min = min.min(instance.costs[j]);
+        }
+        ti.push(min as f32);
+    }
     ti
 }
 fn solve(mut instance: Instance) -> f32 {
-    let zmax = i32::MIN;
-    let zUB = i32::MIN;
-    let zLB = 0;
-    let mut pk: Vec<i32> = vec![0; instance.n];
-    pk.copy_from_slice(&instance.costs[0..instance.n]);
-    0.6
+    let mut z_max = f32::MIN;
+    let mut z_ub = f32::MAX;
+    let mut z_lb = 0.;
+    let mut pk: Vec<f32> = instance.costs.iter().map(|f| *f as f32).collect();
+    let mut ti = init_ti(&instance);
+    let mut x = vec![false; instance.n];
+    let mut c_big = vec![0.0; instance.n];
+    let mut g_big: Vec<f32> = vec![0.0; instance.m];
+    let mut f = 2.0;
+    let mut changed_zub = 0;
+    let mut iteration = 0;
+    let mut sol = Vec::with_capacity(instance.n);
+    let mut last_zmax = z_max;
+    loop {
+        // etape 2
+        /*for j in 0..instance.n {
+            c_big[j] = instance.costs[j] as f32;
+            for i in 0..instance.m {
+                if instance.rows[i].contains(&j) {
+                    c_big[j] -= ti[i];
+                }
+            }
+            c_big[j] = c_big[j];
+            x[j] = c_big[j] < 0.0;
+        }*/
+        for j in 0..instance.n {
+            c_big[j] = instance.costs[j] as f32;
+        }
+        for i in 0..instance.m {
+            // c_j - Σ_i t_i u_ij
+            for &j in &instance.rows[i] {
+                c_big[j] -= ti[i];
+            }
+        }
+        for j in 0..instance.n {
+            x[j] = c_big[j] <= 0.0;
+        }
+        z_lb = 0.;
+        for j in 0..instance.n {
+            if x[j] {
+                z_lb += c_big[j];
+            }
+        }
+        for i in 0..instance.m {
+            z_lb += ti[i];
+        }
+        // Update 2
+        z_max = z_max.max(z_lb);
+        // Etape 3
+        sol.clear();
+
+        // 3(a) : Ajouter les colonnes où X_j = 1
+        for (j, &xp) in x.iter().enumerate() {
+            if xp {
+                sol.push(j);
+            }
+        }
+
+        // 3(b) : Pour chaque ligne non couverte, ajouter la colonne valide de coût minimal
+        for i in 0..instance.m {
+            // Vérifier si la ligne i est couverte par 'sol'
+            let mut covered = false;
+            for &j in &sol {
+                if instance.rows[i].contains(&j) {
+                    covered = true;
+                    break;
+                }
+            }
+
+            // Si la ligne n'est pas couverte, trouver la meilleure colonne disponible
+            if !covered {
+                let mut best_j = None;
+                let mut min_cost = i32::MAX;
+                for &j in &instance.rows[i] {
+                    if instance.costs[j] < min_cost {
+                        min_cost = instance.costs[j];
+                        best_j = Some(j);
+                    }
+                }
+                if let Some(j) = best_j {
+                    if !sol.contains(&j) {
+                        sol.push(j);
+                    }
+                }
+            }
+        }
+
+        // 3(c) : Supprimer les colonnes redondantes en partant de l'indice le plus grand
+        sol.sort_by(|a, b| b.cmp(a));
+        let mut temp_sol = sol.clone();
+        for &j_to_remove in &sol {
+            // Tester si S - {j} reste réalisable (couvre toutes les lignes)
+            let candidate_sol: Vec<usize> = temp_sol
+                .iter()
+                .cloned()
+                .filter(|&j| j != j_to_remove)
+                .collect();
+
+            let mut all_covered = true;
+            for i in 0..instance.m {
+                let mut covered = false;
+                for &j in &candidate_sol {
+                    if instance.rows[i].contains(&j) {
+                        covered = true;
+                        break;
+                    }
+                }
+                if !covered {
+                    all_covered = false;
+                    break;
+                }
+            }
+
+            if all_covered {
+                temp_sol = candidate_sol;
+            }
+        }
+        sol = temp_sol;
+
+        // 3(d) : Mettre à jour Z_UB
+        let sol_cj: f32 = sol.iter().map(|&f| instance.costs[f] as f32).sum();
+        z_ub = z_ub.min(sol_cj);
+
+        let sol_cj: f32 = sol.iter().map(|&f| instance.costs[f]).sum::<i32>() as f32;
+        z_ub = z_ub.min(sol_cj);
+        // Etape 4
+        if z_max == z_ub {
+            break;
+        }
+        // Etape 5
+        for k in 0..instance.n {
+            if x[k] {
+                pk[k] = pk[k].max(z_lb);
+            } else {
+                pk[k] = pk[k].max(z_lb + c_big[k]);
+            }
+            if pk[k] > z_ub {
+                instance.costs[k] = i32::MAX;
+            }
+        }
+        // Etape 6
+        for i in 0..instance.m {
+            g_big[i] = 1.;
+            for j in 0..instance.n {
+                if x[j] && instance.rows[i].contains(&j) {
+                    g_big[i] -= 1.;
+                }
+            }
+            if ti[i] == 0. && g_big[i] < 0. {
+                g_big[i] = 0.;
+            }
+        }
+        // Etape 7
+        let mut crutial_value = 0.;
+        for i in 0..instance.m {
+            crutial_value += g_big[i].powi(2);
+        }
+        if crutial_value == 0. {
+            break;
+        }
+        // Etape 8
+        if changed_zub >= 30 {
+            f /= 2.;
+        }
+        let step_size_t = f * (1.05 * z_ub - z_lb) / crutial_value;
+        // Etape 9
+        if f <= 0.005 {
+            break;
+        }
+        // Etape 10
+        for i in 0..instance.m {
+            ti[i] = (ti[i] + step_size_t * g_big[i]).max(0.);
+        }
+
+        iteration += 1;
+        if z_max > last_zmax {
+            changed_zub = 0;
+            f = 2.0;
+            last_zmax = z_max;
+        }
+        changed_zub += 1;
+        //println!("zub : {z_ub}, zmax : {z_max}, zlb : {z_lb}, f : {f} | {iteration}");
+    }
+    //println!("zub : {z_ub}, zmax : {z_max}, zlb : {z_lb}, f : {f} | {iteration}");
+    return z_ub;
 }
 fn main() {
     let instance = parse_instance();
-
-    println!("m = {}", instance.m);
-    println!("n = {}", instance.n);
+    let start = Instant::now();
     solve(instance);
+    println!("Computed in {} ms", start.elapsed().as_millis());
 }
