@@ -88,6 +88,7 @@ fn init_ti(instance: &Instance) -> Vec<f64> {
     ti
 }
 fn solve(instance: Instance) -> f64 {
+    let debug = false;
     let start = Instant::now();
     let mut z_max = f64::NEG_INFINITY;
     let mut z_ub = f64::MAX;
@@ -108,7 +109,7 @@ fn solve(instance: Instance) -> f64 {
     let mut sol_mark = vec![0usize; instance.n];
     let mut sol_generation = 0usize;
 
-    println!("Init : {} ms", start.elapsed().as_micros());
+    println!("Init : {} ms", start.elapsed().as_millis());
     loop {
         sol_generation += 1;
         let start = Instant::now();
@@ -212,7 +213,7 @@ fn solve(instance: Instance) -> f64 {
             }
         }
 
-        let update2_time = start2.elapsed().as_micros();
+        let update2_time = start2.elapsed().as_millis();
         // 3(d) : Mettre à jour Z_UB
         let sol_cj: f64 = sol
             .iter()
@@ -288,11 +289,13 @@ fn solve(instance: Instance) -> f64 {
         for &(s, v) in sol.iter() {
             last_x[s] = v;
         }
-        println!(
-            "zub : {z_ub}, zmax : {z_max}, zlb : {z_lb}, f : {f} | {iteration} in {} ms | update2 {} ms",
-            start.elapsed().as_micros(),
-            update2_time
-        );
+        if debug {
+            println!(
+                "zub : {z_ub}, zmax : {z_max}, zlb : {z_lb}, f : {f} | {iteration} in {} ms | update2 {} us",
+                start.elapsed().as_millis(),
+                update2_time
+            );
+        }
     }
     println!("zub : {z_ub}, zmax : {z_max}, zlb : {z_lb}, f : {f} | {iteration}");
     return z_ub;
@@ -314,8 +317,8 @@ fn main() {
     let path = FILE[file_number];
     println!("Instances : {path}");
     let instance = parse_instance(path);
-    println!("Parsed in {} ms", start.elapsed().as_micros());
+    println!("Parsed in {} ms", start.elapsed().as_millis());
     let start = Instant::now();
     solve(instance);
-    println!("Computed in {} ms", start.elapsed().as_micros());
+    println!("Computed in {} ms", start.elapsed().as_millis());
 }
