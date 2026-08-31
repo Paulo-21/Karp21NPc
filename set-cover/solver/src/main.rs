@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, f32, fs, time::Instant};
+use std::{env, f64, fs, time::Instant};
 
 #[derive(Debug)]
 struct Instance {
@@ -6,13 +6,11 @@ struct Instance {
     n: usize,              // nombre de colonnes
     costs: Vec<i32>,       // coût de chaque colonne
     rows: Vec<Vec<usize>>, // colonnes qui couvrent chaque ligne
-    covered: Vec<u32>,
+    covering_map: Vec<Vec<usize>>,
 }
 
-fn parse_instance() -> Instance {
-    //let file = fs::read_to_string("../instances/scp41.txt").unwrap();
-    //let file = fs::read_to_string("../instances/scp510.txt").unwrap();
-    let file = fs::read_to_string("../instances/scpnrh5.txt").unwrap();
+fn parse_instance(path: &str) -> Instance {
+    let file = fs::read_to_string(path).unwrap();
 
     // Tous les nombres du fichier, indépendamment des retours à la ligne.
     let mut tokens = file.split_ascii_whitespace();
@@ -25,7 +23,7 @@ fn parse_instance() -> Instance {
 
     // Les n coûts des colonnes
     let mut costs = Vec::with_capacity(n);
-    let mut covered: Vec<u32> = vec![0; n];
+    let mut covering_score: Vec<u32> = vec![0; n];
     let mut idx: Vec<usize> = Vec::with_capacity(n);
     for id in 0..n {
         let cost: i32 = tokens.next().unwrap().parse().unwrap();
@@ -40,6 +38,7 @@ fn parse_instance() -> Instance {
     }
     // Les m lignes de couverture
     let mut rows = Vec::with_capacity(m);
+    let mut covering_map = vec![Vec::new(); n];
 
     for i in 0..m {
         // Nombre de colonnes couvrant cette ligne
@@ -55,7 +54,8 @@ fn parse_instance() -> Instance {
             let col: usize = tokens.next().unwrap().parse().unwrap();
             // Rust utilise 0..n-1.
             covered_by.push(inverse[col - 1]);
-            covered[inverse[col - 1]] += 1;
+            covering_score[inverse[col - 1]] += 1;
+            covering_map[inverse[col - 1]].push(i);
         }
         rows.push(covered_by);
     }
@@ -63,7 +63,7 @@ fn parse_instance() -> Instance {
         covered_by.sort_by(|&a, &b| {
             costs[a]
                 .cmp(&costs[b])
-                .then_with(|| covered[b].cmp(&covered[a]))
+                .then_with(|| covering_score[b].cmp(&covering_score[a]))
         });
     }
 
@@ -72,10 +72,10 @@ fn parse_instance() -> Instance {
         n,
         costs,
         rows,
-        covered,
+        covering_map,
     }
 }
-fn init_ti(instance: &Instance) -> Vec<f32> {
+fn init_ti(instance: &Instance) -> Vec<f64> {
     let mut ti = Vec::with_capacity(instance.m);
     for i in 0..instance.m {
         let mut min = i32::MAX;
@@ -83,48 +83,44 @@ fn init_ti(instance: &Instance) -> Vec<f32> {
         for &j in &instance.rows[i] {
             min = min.min(instance.costs[j]);
         }
-        ti.push(min as f32);
+        ti.push(min as f64);
     }
     ti
 }
-fn solve(mut instance: Instance) -> f32 {
+fn solve(instance: Instance) -> f64 {
     let start = Instant::now();
-    let mut z_max = f32::NEG_INFINITY;
-    let mut z_ub = f32::MAX;
+    let mut z_max = f64::NEG_INFINITY;
+    let mut z_ub = f64::MAX;
     let mut z_lb = 0.;
-    let mut pk: Vec<f32> = instance.costs.iter().map(|f| *f as f32).collect();
+    let mut pk: Vec<f64> = instance.costs.iter().map(|f| *f as f64).collect();
     let mut ti = init_ti(&instance);
     let mut x = vec![false; instance.n];
     let mut c_big = vec![0.0; instance.n];
-    let mut g_big: Vec<f32> = vec![0.0; instance.m];
+    let mut g_big: Vec<f64> = vec![0.0; instance.m];
     let mut f = 2.0;
     let mut changed_zub = 0;
     let mut iteration = 0;
     let mut sol = Vec::with_capacity(instance.n);
     let mut last_zmax = z_max;
     let mut eliminated = vec![false; instance.n];
-    let mut in_sol = vec![false; instance.n];
-    println!("Init : {} ms", start.elapsed().as_millis());
+    let mut last_x = vec![false; instance.n];
+    let mut covering_number = vec![0; instance.m];
+    let mut sol_mark = vec![0usize; instance.n];
+    let mut sol_generation = 0usize;
+
+    println!("Init : {} ms", start.elapsed().as_micros());
     loop {
+        sol_generation += 1;
         let start = Instant::now();
         // etape 2
-        /*for j in 0..instance.n {
-            c_big[j] = instance.costs[j] as f32;
-            for i in 0..instance.m {
-                if instance.rows[i].contains(&j) {
-                    c_big[j] -= ti[i];
-                }
-            }
-            c_big[j] = c_big[j];
-            x[j] = c_big[j] < 0.0;
-        }*/
+
         for j in 0..instance.n {
             if eliminated[j] {
-                c_big[j] = f32::MAX; // Ignorer cette colonne
+                c_big[j] = f64::MAX; // Ignorer cette colonne
                 x[j] = false;
                 continue;
             }
-            c_big[j] = instance.costs[j] as f32;
+            c_big[j] = instance.costs[j] as f64;
         }
 
         for i in 0..instance.m {
@@ -153,64 +149,75 @@ fn solve(mut instance: Instance) -> f32 {
         let start2 = Instant::now();
         z_max = z_max.max(z_lb);
         // Etape 3
+        for (idx, x1) in x.iter().enumerate() {
+            if *x1 != last_x[idx] {
+                if *x1 {
+                    for &cov in instance.covering_map[idx].iter() {
+                        covering_number[cov] += 1;
+                    }
+                } else {
+                    for &cov in instance.covering_map[idx].iter() {
+                        covering_number[cov] -= 1;
+                    }
+                }
+            }
+        }
         sol.clear();
 
         // 3(a) : Ajouter les colonnes où X_j = 1
         for (j, &xp) in x.iter().enumerate() {
             if xp {
-                sol.push(j);
+                sol.push((j, true));
+                sol_mark[j] = sol_generation;
             }
         }
-        in_sol.copy_from_slice(&x);
+        //in_sol.copy_from_slice(&x);
 
         // 3(b) : Pour chaque ligne non couverte, ajouter la colonne valide de coût minimal
         for i in 0..instance.m {
-            let covered = instance.rows[i].iter().any(|&j| in_sol[j]);
-            if !covered {
+            if covering_number[i] == 0 {
                 let best_j = instance.rows[i].iter().find(|&&j| !eliminated[j]).unwrap();
 
-                sol.push(*best_j);
-                in_sol[*best_j] = true;
+                if sol_mark[*best_j] != sol_generation {
+                    sol.push((*best_j, true));
+                    sol_mark[*best_j] = sol_generation;
+
+                    for &cov in &instance.covering_map[*best_j] {
+                        covering_number[cov] += 1;
+                    }
+                }
             }
         }
 
         // 3(c) : Supprimer les colonnes redondantes en partant de l'indice le plus grand
-        let st3 = Instant::now();
-        sol.sort_unstable_by(|a, b| b.cmp(a));
-        let mut temp_sol = sol.clone();
-        for &j_to_remove in sol.iter().rev() {
+        sol.sort_by(|a, b| b.0.cmp(&a.0));
+        for (j_to_remove, validity) in sol.iter_mut() {
             // Tester si S - {j} reste réalisable (couvre toutes les lignes)
-            let candidate_sol: Vec<usize> = temp_sol
-                .iter()
-                .cloned()
-                .filter(|&j| j != j_to_remove)
-                .collect();
-
-            let mut all_covered = true;
-            for i in 0..instance.m {
-                let mut covered = false;
-                for &j in &candidate_sol {
-                    if instance.rows[i].contains(&j) {
-                        covered = true;
-                        break;
+            let mut cannot = false;
+            for (j, &kk) in instance.covering_map[*j_to_remove].iter().enumerate() {
+                covering_number[kk] -= 1;
+                if covering_number[kk] <= 0 {
+                    cannot = true;
+                    for (idx_jjj, &jjj) in instance.covering_map[*j_to_remove].iter().enumerate() {
+                        if idx_jjj > j {
+                            break;
+                        }
+                        covering_number[jjj] += 1;
                     }
-                }
-                if !covered {
-                    all_covered = false;
                     break;
                 }
             }
-
-            if all_covered {
-                temp_sol = candidate_sol;
+            if !cannot {
+                *validity = false;
             }
         }
-        sol = temp_sol;
-        println!("eee {} ms", st3.elapsed().as_millis());
-        //println!("UPDATE 2 : {} ms", start2.elapsed().as_millis());*
-        let update2_time = start2.elapsed().as_millis();
+
+        let update2_time = start2.elapsed().as_micros();
         // 3(d) : Mettre à jour Z_UB
-        let sol_cj: f32 = sol.iter().map(|&f| instance.costs[f]).sum::<i32>() as f32;
+        let sol_cj: f64 = sol
+            .iter()
+            .map(|&f| if f.1 { instance.costs[f.0] } else { 0 })
+            .sum::<i32>() as f64;
         z_ub = z_ub.min(sol_cj);
 
         // Etape 4
@@ -239,7 +246,7 @@ fn solve(mut instance: Instance) -> f32 {
                     coverage += 1;
                 }
             }
-            g_big[i] = 1.0 - coverage as f32;
+            g_big[i] = 1.0 - coverage as f64;
 
             if ti[i] == 0.0 && g_big[i] < 0.0 {
                 g_big[i] = 0.0;
@@ -248,7 +255,7 @@ fn solve(mut instance: Instance) -> f32 {
         // Etape 7
         let mut crutial_value = 0.;
         for i in 0..instance.m {
-            crutial_value += g_big[i].powi(2);
+            crutial_value += g_big[i] * g_big[i];
         }
         if crutial_value == 0. {
             break;
@@ -276,20 +283,39 @@ fn solve(mut instance: Instance) -> f32 {
         }
         changed_zub += 1;
 
+        std::mem::swap(&mut x, &mut last_x);
+        last_x.fill(false);
+        for &(s, v) in sol.iter() {
+            last_x[s] = v;
+        }
         println!(
             "zub : {z_ub}, zmax : {z_max}, zlb : {z_lb}, f : {f} | {iteration} in {} ms | update2 {} ms",
-            start.elapsed().as_millis(),
+            start.elapsed().as_micros(),
             update2_time
         );
     }
     println!("zub : {z_ub}, zmax : {z_max}, zlb : {z_lb}, f : {f} | {iteration}");
     return z_ub;
 }
+const FILE: [&str; 6] = [
+    "../instances/scp41.txt",
+    "../instances/scp510.txt",
+    "../instances/scpnrh5.txt",
+    "../instances/scpclr12.txt",
+    "../instances/scpd5.txt",
+    "../instances/scp61.txt",
+];
 fn main() {
     let start = Instant::now();
-    let instance = parse_instance();
-    println!("Parsed in {} ms", start.elapsed().as_millis());
+    let mut file_number: usize = 0;
+    if env::args().len() > 1 {
+        file_number = env::args().nth(1).unwrap().parse().unwrap();
+    }
+    let path = FILE[file_number];
+    println!("Instances : {path}");
+    let instance = parse_instance(path);
+    println!("Parsed in {} ms", start.elapsed().as_micros());
     let start = Instant::now();
     solve(instance);
-    println!("Computed in {} ms", start.elapsed().as_millis());
+    println!("Computed in {} ms", start.elapsed().as_micros());
 }
