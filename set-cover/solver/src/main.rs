@@ -191,7 +191,7 @@ fn solve(instance: Instance) -> f64 {
         }
 
         // 3(c) : Supprimer les colonnes redondantes en partant de l'indice le plus grand
-        sol.sort_by(|a, b| b.0.cmp(&a.0));
+        sol.sort_unstable_by(|a, b| b.0.cmp(&a.0));
         for (j_to_remove, validity) in sol.iter_mut() {
             // Tester si S - {j} reste réalisable (couvre toutes les lignes)
             let mut cannot = false;
