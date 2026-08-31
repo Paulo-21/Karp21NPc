@@ -1,4 +1,4 @@
-use std::{f32, fs, iter::Sum, time::Instant};
+use std::{f32, fs, time::Instant};
 
 #[derive(Debug)]
 struct Instance {
@@ -10,7 +10,8 @@ struct Instance {
 
 fn parse_instance() -> Instance {
     //let file = fs::read_to_string("../instances/scp41.txt").unwrap();
-    let file = fs::read_to_string("../instances/scp510.txt").unwrap();
+    //let file = fs::read_to_string("../instances/scp510.txt").unwrap();
+    let file = fs::read_to_string("../instances/scpnrh5.txt").unwrap();
 
     // Tous les nombres du fichier, indépendamment des retours à la ligne.
     let mut tokens = file.split_ascii_whitespace();
@@ -47,7 +48,7 @@ fn parse_instance() -> Instance {
             // Rust utilise 0..n-1.
             covered_by.push(col - 1);
         }
-
+        covered_by.sort_by(|&a, &b| costs[a as usize].cmp(&costs[b as usize]));
         rows.push(covered_by);
     }
 
@@ -66,7 +67,7 @@ fn init_ti(instance: &Instance) -> Vec<f32> {
     ti
 }
 fn solve(mut instance: Instance) -> f32 {
-    let mut z_max = f32::MIN;
+    let mut z_max = f32::NEG_INFINITY;
     let mut z_ub = f32::MAX;
     let mut z_lb = 0.;
     let mut pk: Vec<f32> = instance.costs.iter().map(|f| *f as f32).collect();
@@ -79,6 +80,7 @@ fn solve(mut instance: Instance) -> f32 {
     let mut iteration = 0;
     let mut sol = Vec::with_capacity(instance.n);
     let mut last_zmax = z_max;
+    let mut eliminated = vec![false; instance.n];
     loop {
         // etape 2
         /*for j in 0..instance.n {
@@ -92,20 +94,30 @@ fn solve(mut instance: Instance) -> f32 {
             x[j] = c_big[j] < 0.0;
         }*/
         for j in 0..instance.n {
+            if eliminated[j] {
+                c_big[j] = f32::MAX; // Ignorer cette colonne
+                x[j] = false;
+                continue;
+            }
             c_big[j] = instance.costs[j] as f32;
         }
+
         for i in 0..instance.m {
-            // c_j - Σ_i t_i u_ij
             for &j in &instance.rows[i] {
-                c_big[j] -= ti[i];
+                if !eliminated[j] {
+                    c_big[j] -= ti[i];
+                }
             }
         }
+
         for j in 0..instance.n {
-            x[j] = c_big[j] <= 0.0;
+            if !eliminated[j] {
+                x[j] = c_big[j] <= 0.0;
+            }
         }
         z_lb = 0.;
         for j in 0..instance.n {
-            if x[j] {
+            if !eliminated[j] && x[j] {
                 z_lb += c_big[j];
             }
         }
@@ -140,7 +152,7 @@ fn solve(mut instance: Instance) -> f32 {
                 let mut best_j = None;
                 let mut min_cost = i32::MAX;
                 for &j in &instance.rows[i] {
-                    if instance.costs[j] < min_cost {
+                    if !eliminated[j] && instance.costs[j] < min_cost {
                         min_cost = instance.costs[j];
                         best_j = Some(j);
                     }
@@ -186,36 +198,39 @@ fn solve(mut instance: Instance) -> f32 {
         sol = temp_sol;
 
         // 3(d) : Mettre à jour Z_UB
-        let sol_cj: f32 = sol.iter().map(|&f| instance.costs[f] as f32).sum();
-        z_ub = z_ub.min(sol_cj);
-
         let sol_cj: f32 = sol.iter().map(|&f| instance.costs[f]).sum::<i32>() as f32;
         z_ub = z_ub.min(sol_cj);
+
         // Etape 4
-        if z_max == z_ub {
+        if z_max.ceil() >= z_ub {
             break;
         }
         // Etape 5
         for k in 0..instance.n {
-            if x[k] {
-                pk[k] = pk[k].max(z_lb);
-            } else {
-                pk[k] = pk[k].max(z_lb + c_big[k]);
-            }
-            if pk[k] > z_ub {
-                instance.costs[k] = i32::MAX;
+            if !eliminated[k] {
+                if x[k] {
+                    pk[k] = pk[k].max(z_lb);
+                } else {
+                    pk[k] = pk[k].max(z_lb + c_big[k]);
+                }
+                if pk[k] > z_ub {
+                    eliminated[k] = true; // On marque comme éliminé sans toucher aux coûts
+                }
             }
         }
         // Etape 6
         for i in 0..instance.m {
-            g_big[i] = 1.;
-            for j in 0..instance.n {
-                if x[j] && instance.rows[i].contains(&j) {
-                    g_big[i] -= 1.;
+            let mut coverage = 0;
+
+            for &j in &instance.rows[i] {
+                if x[j] {
+                    coverage += 1;
                 }
             }
-            if ti[i] == 0. && g_big[i] < 0. {
-                g_big[i] = 0.;
+            g_big[i] = 1.0 - coverage as f32;
+
+            if ti[i] == 0.0 && g_big[i] < 0.0 {
+                g_big[i] = 0.0;
             }
         }
         // Etape 7
@@ -232,7 +247,8 @@ fn solve(mut instance: Instance) -> f32 {
         }
         let step_size_t = f * (1.05 * z_ub - z_lb) / crutial_value;
         // Etape 9
-        if f <= 0.005 {
+        //if f <= 0.005 {
+        if iteration >= 1000 {
             break;
         }
         // Etape 10
@@ -243,13 +259,13 @@ fn solve(mut instance: Instance) -> f32 {
         iteration += 1;
         if z_max > last_zmax {
             changed_zub = 0;
-            f = 2.0;
+            //f = 2.0;
             last_zmax = z_max;
         }
         changed_zub += 1;
-        //println!("zub : {z_ub}, zmax : {z_max}, zlb : {z_lb}, f : {f} | {iteration}");
+        println!("zub : {z_ub}, zmax : {z_max}, zlb : {z_lb}, f : {f} | {iteration}");
     }
-    //println!("zub : {z_ub}, zmax : {z_max}, zlb : {z_lb}, f : {f} | {iteration}");
+    println!("zub : {z_ub}, zmax : {z_max}, zlb : {z_lb}, f : {f} | {iteration}");
     return z_ub;
 }
 fn main() {
