@@ -10,9 +10,9 @@ struct Instance {
 }
 
 fn parse_instance() -> Instance {
-    let file = fs::read_to_string("../instances/scp41.txt").unwrap();
+    //let file = fs::read_to_string("../instances/scp41.txt").unwrap();
     //let file = fs::read_to_string("../instances/scp510.txt").unwrap();
-    //let file = fs::read_to_string("../instances/scpnrh5.txt").unwrap();
+    let file = fs::read_to_string("../instances/scpnrh5.txt").unwrap();
 
     // Tous les nombres du fichier, indépendamment des retours à la ligne.
     let mut tokens = file.split_ascii_whitespace();
@@ -26,12 +26,18 @@ fn parse_instance() -> Instance {
     // Les n coûts des colonnes
     let mut costs = Vec::with_capacity(n);
     let mut covered: Vec<u32> = vec![0; n];
-
-    for _ in 0..n {
+    let mut idx: Vec<usize> = Vec::with_capacity(n);
+    for id in 0..n {
         let cost: i32 = tokens.next().unwrap().parse().unwrap();
         costs.push(cost);
+        idx.push(id);
     }
-
+    idx.sort_by_key(|&k| costs[k]);
+    costs.sort();
+    let mut inverse = vec![0usize; n];
+    for (en, &id) in idx.iter().enumerate() {
+        inverse[id] = en;
+    }
     // Les m lignes de couverture
     let mut rows = Vec::with_capacity(m);
 
@@ -48,8 +54,8 @@ fn parse_instance() -> Instance {
         for _ in 0..k {
             let col: usize = tokens.next().unwrap().parse().unwrap();
             // Rust utilise 0..n-1.
-            covered_by.push(col - 1);
-            covered[col - 1] += 1;
+            covered_by.push(inverse[col - 1]);
+            covered[inverse[col - 1]] += 1;
         }
         rows.push(covered_by);
     }
@@ -97,6 +103,7 @@ fn solve(mut instance: Instance) -> f32 {
     let mut sol = Vec::with_capacity(instance.n);
     let mut last_zmax = z_max;
     let mut eliminated = vec![false; instance.n];
+    let mut in_sol = vec![false; instance.n];
     println!("Init : {} ms", start.elapsed().as_millis());
     loop {
         let start = Instant::now();
@@ -154,35 +161,24 @@ fn solve(mut instance: Instance) -> f32 {
                 sol.push(j);
             }
         }
+        in_sol.copy_from_slice(&x);
 
         // 3(b) : Pour chaque ligne non couverte, ajouter la colonne valide de coût minimal
         for i in 0..instance.m {
-            // Vérifier si la ligne i est couverte par 'sol'
-            let mut covered = false;
-            for &j in &sol {
-                if instance.rows[i].contains(&j) {
-                    covered = true;
-                    break;
-                }
-            }
-
-            // Si la ligne n'est pas couverte, trouver la meilleure colonne disponible
+            let covered = instance.rows[i].iter().any(|&j| in_sol[j]);
             if !covered {
-                let mut best_j = 0;
-                for &j in instance.rows[i].iter() {
-                    if !eliminated[j] {
-                        best_j = j;
-                        break;
-                    }
-                }
-                sol.push(best_j);
+                let best_j = instance.rows[i].iter().find(|&&j| !eliminated[j]).unwrap();
+
+                sol.push(*best_j);
+                in_sol[*best_j] = true;
             }
         }
 
         // 3(c) : Supprimer les colonnes redondantes en partant de l'indice le plus grand
+        let st3 = Instant::now();
         sol.sort_unstable_by(|a, b| b.cmp(a));
         let mut temp_sol = sol.clone();
-        for &j_to_remove in &sol {
+        for &j_to_remove in sol.iter().rev() {
             // Tester si S - {j} reste réalisable (couvre toutes les lignes)
             let candidate_sol: Vec<usize> = temp_sol
                 .iter()
@@ -210,6 +206,7 @@ fn solve(mut instance: Instance) -> f32 {
             }
         }
         sol = temp_sol;
+        println!("eee {} ms", st3.elapsed().as_millis());
         //println!("UPDATE 2 : {} ms", start2.elapsed().as_millis());*
         let update2_time = start2.elapsed().as_millis();
         // 3(d) : Mettre à jour Z_UB
@@ -279,11 +276,11 @@ fn solve(mut instance: Instance) -> f32 {
         }
         changed_zub += 1;
 
-        /*println!(
-            "zub : {z_ub}, zmax : {z_max}, zlb : {z_lb}, f : {f} | {iteration} in {} ms | update 2 {}",
+        println!(
+            "zub : {z_ub}, zmax : {z_max}, zlb : {z_lb}, f : {f} | {iteration} in {} ms | update2 {} ms",
             start.elapsed().as_millis(),
             update2_time
-        );*/
+        );
     }
     println!("zub : {z_ub}, zmax : {z_max}, zlb : {z_lb}, f : {f} | {iteration}");
     return z_ub;
