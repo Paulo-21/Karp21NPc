@@ -1,4 +1,4 @@
-use std::{f32, fs, time::Instant};
+use std::{cmp::Ordering, f32, fs, time::Instant};
 
 #[derive(Debug)]
 struct Instance {
@@ -6,12 +6,13 @@ struct Instance {
     n: usize,              // nombre de colonnes
     costs: Vec<i32>,       // coût de chaque colonne
     rows: Vec<Vec<usize>>, // colonnes qui couvrent chaque ligne
+    covered: Vec<u32>,
 }
 
 fn parse_instance() -> Instance {
-    //let file = fs::read_to_string("../instances/scp41.txt").unwrap();
+    let file = fs::read_to_string("../instances/scp41.txt").unwrap();
     //let file = fs::read_to_string("../instances/scp510.txt").unwrap();
-    let file = fs::read_to_string("../instances/scpnrh5.txt").unwrap();
+    //let file = fs::read_to_string("../instances/scpnrh5.txt").unwrap();
 
     // Tous les nombres du fichier, indépendamment des retours à la ligne.
     let mut tokens = file.split_ascii_whitespace();
@@ -24,6 +25,7 @@ fn parse_instance() -> Instance {
 
     // Les n coûts des colonnes
     let mut costs = Vec::with_capacity(n);
+    let mut covered: Vec<u32> = vec![0; n];
 
     for _ in 0..n {
         let cost: i32 = tokens.next().unwrap().parse().unwrap();
@@ -47,12 +49,25 @@ fn parse_instance() -> Instance {
             let col: usize = tokens.next().unwrap().parse().unwrap();
             // Rust utilise 0..n-1.
             covered_by.push(col - 1);
+            covered[col - 1] += 1;
         }
-        covered_by.sort_by(|&a, &b| costs[a as usize].cmp(&costs[b as usize]));
         rows.push(covered_by);
     }
+    for covered_by in rows.iter_mut() {
+        covered_by.sort_by(|&a, &b| {
+            costs[a]
+                .cmp(&costs[b])
+                .then_with(|| covered[b].cmp(&covered[a]))
+        });
+    }
 
-    Instance { m, n, costs, rows }
+    Instance {
+        m,
+        n,
+        costs,
+        rows,
+        covered,
+    }
 }
 fn init_ti(instance: &Instance) -> Vec<f32> {
     let mut ti = Vec::with_capacity(instance.m);
@@ -67,6 +82,7 @@ fn init_ti(instance: &Instance) -> Vec<f32> {
     ti
 }
 fn solve(mut instance: Instance) -> f32 {
+    let start = Instant::now();
     let mut z_max = f32::NEG_INFINITY;
     let mut z_ub = f32::MAX;
     let mut z_lb = 0.;
@@ -81,7 +97,9 @@ fn solve(mut instance: Instance) -> f32 {
     let mut sol = Vec::with_capacity(instance.n);
     let mut last_zmax = z_max;
     let mut eliminated = vec![false; instance.n];
+    println!("Init : {} ms", start.elapsed().as_millis());
     loop {
+        let start = Instant::now();
         // etape 2
         /*for j in 0..instance.n {
             c_big[j] = instance.costs[j] as f32;
@@ -125,6 +143,7 @@ fn solve(mut instance: Instance) -> f32 {
             z_lb += ti[i];
         }
         // Update 2
+        let start2 = Instant::now();
         z_max = z_max.max(z_lb);
         // Etape 3
         sol.clear();
@@ -149,24 +168,19 @@ fn solve(mut instance: Instance) -> f32 {
 
             // Si la ligne n'est pas couverte, trouver la meilleure colonne disponible
             if !covered {
-                let mut best_j = None;
-                let mut min_cost = i32::MAX;
-                for &j in &instance.rows[i] {
-                    if !eliminated[j] && instance.costs[j] < min_cost {
-                        min_cost = instance.costs[j];
-                        best_j = Some(j);
+                let mut best_j = 0;
+                for &j in instance.rows[i].iter() {
+                    if !eliminated[j] {
+                        best_j = j;
+                        break;
                     }
                 }
-                if let Some(j) = best_j {
-                    if !sol.contains(&j) {
-                        sol.push(j);
-                    }
-                }
+                sol.push(best_j);
             }
         }
 
         // 3(c) : Supprimer les colonnes redondantes en partant de l'indice le plus grand
-        sol.sort_by(|a, b| b.cmp(a));
+        sol.sort_unstable_by(|a, b| b.cmp(a));
         let mut temp_sol = sol.clone();
         for &j_to_remove in &sol {
             // Tester si S - {j} reste réalisable (couvre toutes les lignes)
@@ -196,7 +210,8 @@ fn solve(mut instance: Instance) -> f32 {
             }
         }
         sol = temp_sol;
-
+        //println!("UPDATE 2 : {} ms", start2.elapsed().as_millis());*
+        let update2_time = start2.elapsed().as_millis();
         // 3(d) : Mettre à jour Z_UB
         let sol_cj: f32 = sol.iter().map(|&f| instance.costs[f]).sum::<i32>() as f32;
         z_ub = z_ub.min(sol_cj);
@@ -247,8 +262,8 @@ fn solve(mut instance: Instance) -> f32 {
         }
         let step_size_t = f * (1.05 * z_ub - z_lb) / crutial_value;
         // Etape 9
-        //if f <= 0.005 {
-        if iteration >= 1000 {
+        if f <= 0.005 {
+            //if iteration >= 1000 {
             break;
         }
         // Etape 10
@@ -263,13 +278,20 @@ fn solve(mut instance: Instance) -> f32 {
             last_zmax = z_max;
         }
         changed_zub += 1;
-        println!("zub : {z_ub}, zmax : {z_max}, zlb : {z_lb}, f : {f} | {iteration}");
+
+        /*println!(
+            "zub : {z_ub}, zmax : {z_max}, zlb : {z_lb}, f : {f} | {iteration} in {} ms | update 2 {}",
+            start.elapsed().as_millis(),
+            update2_time
+        );*/
     }
     println!("zub : {z_ub}, zmax : {z_max}, zlb : {z_lb}, f : {f} | {iteration}");
     return z_ub;
 }
 fn main() {
+    let start = Instant::now();
     let instance = parse_instance();
+    println!("Parsed in {} ms", start.elapsed().as_millis());
     let start = Instant::now();
     solve(instance);
     println!("Computed in {} ms", start.elapsed().as_millis());
