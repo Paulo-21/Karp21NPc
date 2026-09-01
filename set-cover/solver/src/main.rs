@@ -12,7 +12,6 @@ struct Instance {
 fn parse_instance(path: &str) -> Instance {
     let file = fs::read_to_string(path).unwrap();
 
-    // Tous les nombres du fichier, indépendamment des retours à la ligne.
     let mut tokens = file.split_ascii_whitespace();
 
     // Première ligne : m n
@@ -21,7 +20,6 @@ fn parse_instance(path: &str) -> Instance {
 
     println!("m = {m}, n = {n}");
 
-    // Les n coûts des colonnes
     let mut costs = Vec::with_capacity(n);
     let mut covering_score: Vec<u32> = vec![0; n];
     let mut idx: Vec<usize> = Vec::with_capacity(n);
@@ -234,14 +232,13 @@ fn solve(instance: Instance) -> f64 {
                     pk[k] = pk[k].max(z_lb + c_big[k]);
                 }
                 if pk[k] > z_ub {
-                    eliminated[k] = true; // On marque comme éliminé sans toucher aux coûts
+                    eliminated[k] = true;
                 }
             }
         }
         // Etape 6
         for i in 0..instance.m {
             let mut coverage = 0;
-
             for &j in &instance.rows[i] {
                 if x[j] {
                     coverage += 1;
@@ -285,7 +282,7 @@ fn solve(instance: Instance) -> f64 {
         changed_zub += 1;
 
         std::mem::swap(&mut x, &mut last_x);
-        last_x.fill(false);
+        //last_x.fill(false);
         for &(s, v) in sol.iter() {
             last_x[s] = v;
         }
@@ -303,10 +300,10 @@ fn solve(instance: Instance) -> f64 {
 const FILE: [&str; 6] = [
     "../instances/scp41.txt",
     "../instances/scp510.txt",
-    "../instances/scpnrh5.txt",
+    "../instances/scp61.txt",
     "../instances/scpclr12.txt",
     "../instances/scpd5.txt",
-    "../instances/scp61.txt",
+    "../instances/scpnrh5.txt",
 ];
 fn main() {
     let start = Instant::now();
