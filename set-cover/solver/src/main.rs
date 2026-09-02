@@ -1,11 +1,12 @@
+mod gen_instance;
 use std::{env, f64, fs, time::Instant};
 
 #[derive(Debug)]
 struct Instance {
-    m: usize,              // nombre de lignes
-    n: usize,              // nombre de colonnes
-    costs: Vec<i32>,       // coût de chaque colonne
-    rows: Vec<Vec<usize>>, // colonnes qui couvrent chaque ligne
+    m: usize,
+    n: usize,
+    costs: Vec<i32>,
+    rows: Vec<Vec<usize>>,
     covering_map: Vec<Vec<usize>>,
 }
 
@@ -14,7 +15,6 @@ fn parse_instance(path: &str) -> Instance {
 
     let mut tokens = file.split_ascii_whitespace();
 
-    // Première ligne : m n
     let m: usize = tokens.next().unwrap().parse().unwrap();
     let n: usize = tokens.next().unwrap().parse().unwrap();
 
@@ -34,7 +34,6 @@ fn parse_instance(path: &str) -> Instance {
     for (en, &id) in idx.iter().enumerate() {
         inverse[id] = en;
     }
-    // Les m lignes de couverture
     let mut rows = Vec::with_capacity(m);
     let mut covering_map = vec![Vec::new(); n];
 
@@ -161,18 +160,30 @@ fn solve(instance: Instance) -> f64 {
                 }
             }
         }
+        // Essaye deplacement de etape 6 ici, pour que pas perturber pas recn
+        for i in 0..instance.m {
+            g_big[i] = 1.0 - covering_number[i] as f64;
+
+            if ti[i] == 0.0 && g_big[i] < 0.0 {
+                g_big[i] = 0.0;
+            }
+        }
         sol.clear();
 
         // 3(a) : Ajouter les colonnes où X_j = 1
         for (j, &xp) in x.iter().enumerate() {
             if xp {
                 sol.push((j, true));
+                /*match sol.binary_search_by(|x| x.cmp(&j)) {
+                    Ok(pos) => {} // element already in vector @ `pos`
+                    Err(pos) => sol.insert(pos, (j, true)),
+                }*/
                 sol_mark[j] = sol_generation;
             }
         }
         //in_sol.copy_from_slice(&x);
 
-        // 3(b) : Pour chaque ligne non couverte, ajouter la colonne valide de coût minimal
+        //3b Pour chaque ligne non couverte, on ajoute la colonne valide de coût minimal
         for i in 0..instance.m {
             if covering_number[i] == 0 {
                 let best_j = instance.rows[i].iter().find(|&&j| !eliminated[j]).unwrap();
@@ -188,10 +199,10 @@ fn solve(instance: Instance) -> f64 {
             }
         }
 
-        // 3(c) : Supprimer les colonnes redondantes en partant de l'indice le plus grand
+        //3c : Supprimer les colonnes redondantes en partant de l'indice le plus grand
         sol.sort_unstable_by(|a, b| b.0.cmp(&a.0));
         for (j_to_remove, validity) in sol.iter_mut() {
-            // Tester si S - {j} reste réalisable (couvre toutes les lignes)
+            // Partie du paper, "tester si S - {j} reste réalisable (couvre toutes les lignes)"
             let mut cannot = false;
             for (j, &kk) in instance.covering_map[*j_to_remove].iter().enumerate() {
                 covering_number[kk] -= 1;
@@ -212,7 +223,7 @@ fn solve(instance: Instance) -> f64 {
         }
 
         let update2_time = start2.elapsed().as_millis();
-        // 3(d) : Mettre à jour Z_UB
+        // Etape 3(d) : Mettre à jour Z_UB
         let sol_cj: f64 = sol
             .iter()
             .map(|&f| if f.1 { instance.costs[f.0] } else { 0 })
@@ -223,7 +234,7 @@ fn solve(instance: Instance) -> f64 {
         if z_max.ceil() >= z_ub {
             break;
         }
-        // Etape 5
+        // etape 5
         for k in 0..instance.n {
             if !eliminated[k] {
                 if x[k] {
@@ -236,8 +247,8 @@ fn solve(instance: Instance) -> f64 {
                 }
             }
         }
-        // Etape 6
-        for i in 0..instance.m {
+        // Etape 666
+        /*for i in 0..instance.m {
             let mut coverage = 0;
             for &j in &instance.rows[i] {
                 if x[j] {
@@ -249,7 +260,8 @@ fn solve(instance: Instance) -> f64 {
             if ti[i] == 0.0 && g_big[i] < 0.0 {
                 g_big[i] = 0.0;
             }
-        }
+        }*/
+
         // Etape 7
         let mut crutial_value = 0.;
         for i in 0..instance.m {
@@ -264,7 +276,7 @@ fn solve(instance: Instance) -> f64 {
         }
         let step_size_t = f * (1.05 * z_ub - z_lb) / crutial_value;
         // Etape 9
-        if f <= 0.005 {
+        if f <= 0.0005 {
             //if iteration >= 1000 {
             break;
         }
@@ -308,11 +320,23 @@ const FILE: [&str; 6] = [
 fn main() {
     let start = Instant::now();
     let mut file_number: usize = 0;
-    if env::args().len() > 1 {
+    if env::args().len() == 3 {
+        let m = 40000;
+        let n = 7000;
+
+        // 10 % de densité de couverture
+        let density = 0.20;
+
+        // Graine permettant de reproduire exactement l'instance
+        let seed = 42;
+
+        let _ = gen_instance::generate_instance("instance.txt", m, n, density, seed);
+    } else if env::args().len() == 2 {
         file_number = env::args().nth(1).unwrap().parse().unwrap();
     }
     let path = FILE[file_number];
     println!("Instances : {path}");
+    //let path = "instance.txt";
     let instance = parse_instance(path);
     println!("Parsed in {} ms", start.elapsed().as_millis());
     let start = Instant::now();

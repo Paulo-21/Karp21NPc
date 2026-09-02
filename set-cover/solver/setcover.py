@@ -121,7 +121,7 @@ def solve(m, n, costs, rows):
     # IMPORTANT :
     # Il y a n colonnes, pas m.
     x = [
-        model.NewBoolVar(f"x_{j}")
+        model.new_bool_var(f"x_{j}")
         for j in range(n)
     ]
 
@@ -136,9 +136,10 @@ def solve(m, n, costs, rows):
                 f"La ligne {i + 1} n'est couverte par aucune colonne."
             )
 
-        model.Add(
-            sum(x[j] for j in rows[i]) >= 1
-        )
+        """model.Add(
+            cp_model.LinearExpr.Sum() >= 1
+        )"""
+        model.add_bool_or(x[j] for j in rows[i])
 
     # ---------------------------------------------------------
     # Fonction objectif
@@ -154,9 +155,10 @@ def solve(m, n, costs, rows):
 
     solver = cp_model.CpSolver()
 
-    solver.parameters.num_search_workers = 1
-    #solver.parameters.max_time_in_seconds = 4
+    solver.parameters.num_search_workers = 20
+    solver.parameters.max_time_in_seconds = 6
     solver.parameters.log_search_progress = True
+    solver.parameters.cp_model_presolve = False
     status = solver.Solve(model)
 
     # ---------------------------------------------------------
@@ -189,7 +191,9 @@ if __name__ == "__main__":
     if len(argv)>1:
         selected = int(argv[1])
     filenames = ["scp41.txt","scp510.txt","scp61.txt","scpclr12.txt","scpd5.txt","scpnrh5.txt"]
-    m, n, costs, rows = parse_scp("../instances/"+filenames[selected])
+    #path = "../instances/"+filenames[selected]
+    path = "instance.txt"
+    m, n, costs, rows = parse_scp(path)
     t = time.time()
     result = solve(m, n, costs, rows)
     print("Solved in ",  time.time()-t)
