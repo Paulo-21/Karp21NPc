@@ -97,7 +97,7 @@ def parse_scp(filename):
     return m, n, costs, rows
 
 
-def solve(m, n, costs, rows):
+def solve(m:int, n:int, costs:list[int], rows):
     # ---------------------------------------------------------
     # Parsing
     # ---------------------------------------------------------
@@ -145,7 +145,7 @@ def solve(m, n, costs, rows):
     # Fonction objectif
     # ---------------------------------------------------------
 
-    model.Minimize(
+    model.minimize(
         sum(costs[j] * x[j] for j in range(n))
     )
 
@@ -155,7 +155,7 @@ def solve(m, n, costs, rows):
 
     solver = cp_model.CpSolver()
 
-    solver.parameters.num_search_workers = 20
+    solver.parameters.num_search_workers = 4
     solver.parameters.max_time_in_seconds = 6
     solver.parameters.log_search_progress = True
     solver.parameters.cp_model_presolve = False

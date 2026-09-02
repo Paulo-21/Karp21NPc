@@ -84,6 +84,7 @@ fn init_ti(instance: &Instance) -> Vec<f64> {
     }
     ti
 }
+#[allow(unused_assignments)]
 fn solve(instance: Instance) -> f64 {
     let debug = false;
     let start = Instant::now();
@@ -120,55 +121,55 @@ fn solve(instance: Instance) -> f64 {
             }
             c_big[j] = instance.costs[j] as f64;
         }
-
-        for i in 0..instance.m {
-            for &j in &instance.rows[i] {
+        unsafe {
+            for (i, e) in instance.rows.iter().enumerate() {
+                for &j in e.iter() {
+                    if !eliminated.get_unchecked(j) {
+                        *c_big.get_unchecked_mut(j) -= ti.get_unchecked(i);
+                    }
+                }
+            }
+            for j in 0..instance.n {
                 if !eliminated[j] {
-                    c_big[j] -= ti[i];
+                    x[j] = c_big[j] <= 0.0;
                 }
             }
-        }
+            z_lb = 0.;
+            for j in 0..instance.n {
+                if !eliminated[j] && x[j] {
+                    z_lb += c_big[j];
+                }
+            }
+            for i in 0..instance.m {
+                z_lb += ti[i];
+            }
+            // Update 2
 
-        for j in 0..instance.n {
-            if !eliminated[j] {
-                x[j] = c_big[j] <= 0.0;
-            }
-        }
-        z_lb = 0.;
-        for j in 0..instance.n {
-            if !eliminated[j] && x[j] {
-                z_lb += c_big[j];
-            }
-        }
-        for i in 0..instance.m {
-            z_lb += ti[i];
-        }
-        // Update 2
-        let start2 = Instant::now();
-        z_max = z_max.max(z_lb);
-        // Etape 3
-        for (idx, x1) in x.iter().enumerate() {
-            if *x1 != last_x[idx] {
-                if *x1 {
-                    for &cov in instance.covering_map[idx].iter() {
-                        covering_number[cov] += 1;
-                    }
-                } else {
-                    for &cov in instance.covering_map[idx].iter() {
-                        covering_number[cov] -= 1;
+            z_max = z_max.max(z_lb);
+            // Etape 3
+            for (idx, x1) in x.iter().enumerate() {
+                if *x1 != last_x[idx] {
+                    if *x1 {
+                        for &cov in instance.covering_map[idx].iter() {
+                            *covering_number.get_unchecked_mut(cov) += 1;
+                        }
+                    } else {
+                        for &cov in instance.covering_map.get_unchecked(idx).iter() {
+                            *covering_number.get_unchecked_mut(cov) -= 1;
+                        }
                     }
                 }
             }
-        }
-        // Essaye deplacement de etape 6 ici, pour que pas perturber pas recn
-        for i in 0..instance.m {
-            g_big[i] = 1.0 - covering_number[i] as f64;
+            // Essaye deplacement de etape 6 ici, pour que pas perturber pas recn
+            for i in 0..instance.m {
+                g_big[i] = 1.0 - covering_number[i] as f64;
 
-            if ti[i] == 0.0 && g_big[i] < 0.0 {
-                g_big[i] = 0.0;
+                if ti[i] == 0.0 && g_big[i] < 0.0 {
+                    g_big[i] = 0.0;
+                }
             }
+            sol.clear();
         }
-        sol.clear();
 
         // 3(a) : Ajouter les colonnes où X_j = 1
         for (j, &xp) in x.iter().enumerate() {
@@ -182,23 +183,26 @@ fn solve(instance: Instance) -> f64 {
             }
         }
         //in_sol.copy_from_slice(&x);
+        unsafe {
+            //3b Pour chaque ligne non couverte, on ajoute la colonne valide de coût minimal
+            for i in 0..instance.m {
+                if covering_number[i] == 0 {
+                    let best_j = instance.rows[i]
+                        .iter()
+                        .find(|&&j| !*eliminated.get_unchecked(j))
+                        .unwrap();
 
-        //3b Pour chaque ligne non couverte, on ajoute la colonne valide de coût minimal
-        for i in 0..instance.m {
-            if covering_number[i] == 0 {
-                let best_j = instance.rows[i].iter().find(|&&j| !eliminated[j]).unwrap();
+                    if *sol_mark.get_unchecked(*best_j) != sol_generation {
+                        sol.push((*best_j, true));
+                        sol_mark[*best_j] = sol_generation;
 
-                if sol_mark[*best_j] != sol_generation {
-                    sol.push((*best_j, true));
-                    sol_mark[*best_j] = sol_generation;
-
-                    for &cov in &instance.covering_map[*best_j] {
-                        covering_number[cov] += 1;
+                        for &cov in instance.covering_map[*best_j].iter() {
+                            covering_number[cov] += 1;
+                        }
                     }
                 }
             }
         }
-
         //3c : Supprimer les colonnes redondantes en partant de l'indice le plus grand
         sol.sort_unstable_by(|a, b| b.0.cmp(&a.0));
         for (j_to_remove, validity) in sol.iter_mut() {
@@ -221,14 +225,20 @@ fn solve(instance: Instance) -> f64 {
                 *validity = false;
             }
         }
-
-        let update2_time = start2.elapsed().as_millis();
-        // Etape 3(d) : Mettre à jour Z_UB
-        let sol_cj: f64 = sol
-            .iter()
-            .map(|&f| if f.1 { instance.costs[f.0] } else { 0 })
-            .sum::<i32>() as f64;
-        z_ub = z_ub.min(sol_cj);
+        unsafe {
+            // Etape 3(d) : Mettre à jour Z_UB
+            let sol_cj: f64 = sol
+                .iter()
+                .map(|&f| {
+                    if f.1 {
+                        *instance.costs.get_unchecked(f.0)
+                    } else {
+                        0
+                    }
+                })
+                .sum::<i32>() as f64;
+            z_ub = z_ub.min(sol_cj);
+        }
 
         // Etape 4
         if z_max.ceil() >= z_ub {
@@ -281,8 +291,11 @@ fn solve(instance: Instance) -> f64 {
             break;
         }
         // Etape 10
-        for i in 0..instance.m {
-            ti[i] = (ti[i] + step_size_t * g_big[i]).max(0.);
+        unsafe {
+            for i in 0..instance.m {
+                *ti.get_unchecked_mut(i) =
+                    (ti.get_unchecked(i) + step_size_t * g_big.get_unchecked(i)).max(0.);
+            }
         }
 
         iteration += 1;
@@ -300,9 +313,8 @@ fn solve(instance: Instance) -> f64 {
         }
         if debug {
             println!(
-                "zub : {z_ub}, zmax : {z_max}, zlb : {z_lb}, f : {f} | {iteration} in {} ms | update2 {} us",
+                "zub : {z_ub}, zmax : {z_max}, zlb : {z_lb}, f : {f} | {iteration} in {} ms",
                 start.elapsed().as_millis(),
-                update2_time
             );
         }
     }
@@ -323,20 +335,15 @@ fn main() {
     if env::args().len() == 3 {
         let m = 40000;
         let n = 7000;
-
-        // 10 % de densité de couverture
         let density = 0.20;
-
-        // Graine permettant de reproduire exactement l'instance
         let seed = 42;
-
         let _ = gen_instance::generate_instance("instance.txt", m, n, density, seed);
     } else if env::args().len() == 2 {
         file_number = env::args().nth(1).unwrap().parse().unwrap();
     }
     let path = FILE[file_number];
+    let path = "instance.txt";
     println!("Instances : {path}");
-    //let path = "instance.txt";
     let instance = parse_instance(path);
     println!("Parsed in {} ms", start.elapsed().as_millis());
     let start = Instant::now();
